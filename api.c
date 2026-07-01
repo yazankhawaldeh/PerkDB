@@ -14,10 +14,10 @@
  * User = name TEXT, id INTEGER PRIMARY KEY AUTOINCREMENT, position TEXT, 
  */
 
-sqlite3 *open_db()
+sqlite3 *open_db(char *FILE_NAME)
 {
     sqlite3* db;
-    if (sqlite3_open("EMPLOYEE_DATA.db", &db) != SQLITE_OK)
+    if (sqlite3_open(FILE_NAME, &db) != SQLITE_OK)
     {
         fprintf(stderr, "Error opening file.");
         exit(1);
@@ -25,26 +25,15 @@ sqlite3 *open_db()
     return db;
 } 
 
-void init_db()
+int CREATE_TABLE(char *FILE_NAME, char* TABLE_NAME, int NUM_COLUMNS, char** COLUMN_NAMES)
 {
-    sqlite3 *db = open_db();
-    sqlite3_exec(db, 
-            "CREATE TABLE IF NOT EXISTS users ("
-                "name TEXT,"
-                "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-                "position TEXT,"
-                "is_cleared INTEGER"
-                ");",
-                0,0,0
-            );
+    sqlite3 *db = open_db(FILE_NAME);
 
-    printf("Database INIT success. Nothing to report here modafucka");
-}
-int CREATE_ENTRY(char *USER_FULL_NAME, int ID_NUM, int COMPANY_POSITION, int CLEARANCE_STATUS)
-{
-    init_db();
-    sqlite3 *db = open_db();
+
     //prepare arguments in parameterized queries
+    //
 
 
 }
+
+
