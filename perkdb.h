@@ -1,3 +1,8 @@
+#ifndef PERKDB_H
+#define PERKDB_H
+
+
+
 #include <stdint.h>
 #include <stdlib.h>
 
@@ -32,3 +37,5 @@ PerkErr perk_delete (PerkDB*, const char *table, const char *where, const PerkVa
 void    perk_result_free(PerkResult*);
 
 PerkErr perk_begin(PerkDB*); PerkErr perk_commit(PerkDB*); PerkErr perk_rollback(PerkDB*);
+
+#endif
