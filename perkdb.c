@@ -88,7 +88,29 @@ PerkErr perk_insert(PerkDB *db, const char *table, const char **cols, const Perk
         return PERK_ERR_SQL;
 
     sqlite3_stmt *st = NULL;
-    if (sqlite3_prepare16_v2(sqlite3 *db, const void *zSql, int nByte, sqlite3_stmt **ppStmt, const void **pzTail)
+    if (sqlite3_prepare16_v2(db->conn, sql, -1, &st, NULL) != SQLITE_OK) {
+        snprintf(db->errmsg, sizeof(db->errmsg), "%s", sqlite3_errmsg(db->conn));
+        return PERK_ERR_SQL;
+    }
+
+    for (size_t i = 0; i < n; i++) {
+        if (bind_value(st,(int)i + 1, &vals[i]) != SQLITE_OK)
+        {
+            snprintf(db->errmsg, sizeof(db->errmsg), "%s", sqlite3_errmsg(db->conn));
+            sqlite3_finalize(st);
+            return PERK_ERR_SQL;
+        }
+    }
+    int rc = sqlite3_step(st);
+    sqlite3_finalize(st);
+    if (rc != SQLITE_DONE) {
+        snprintf(db->errmsg, sizeof(db->errmsg), "%s", sqlite3_errmsg(db->conn));
+        return rc == SQLITE_BUSY ? PERK_ERR_BUSY : PERK_ERR_SQL;
+    }
+
+    if (rowid_out)
+        *rowid_out = sqlite3_last_insert_rowid(db->conn);
+    return PERK_OK;
 
 
                 
