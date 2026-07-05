@@ -63,4 +63,33 @@ void perk_close(PerkDB *db)
     free(db);
 }
 
+PerkErr perk_insert(PerkDB *db, const char *table, const char **cols, const PerkValue *vals, size_t n, int64_t *rowid_out)
+{
+    if (db == NULL || table == NULL || cols == NULL || vals == NULL || n == 0)
+    {
+        return PERK_ERR_SQL;
+    }
+    if (!validate_identifier(table))
+        return PERK_ERR_BADNAME;
+    for (size_t i = 0; i < n; i++)
+        if(!validate_identifier(cols[i]))
+            return PERK_ERR_BADNAME;
+    char sql[1024];
+    size_t off = (size_t)snprintf(sql, sizeof(sql), "INSERT INTO %s (", table);
+    for (size_t i = 0; i < n; i++)
+        off += (size_t)snprintf(sql + off, sizeof(sql) - off, "%s%s",
+                i ? ", " : "", cols[i]);
+    off += (size_t)snprintf(sql + off, sizeof(sql) - off, ") VALUES (");
+    for (size_t i = 0; i < n; i++)
+        off += (size_t)snprintf(sql + off, sizeof(sql) - off, "%s?",
+                i ? ", " : "");
+    off += (size_t)snprintf(sql + off, sizeof sql - off, ")");
+    if (off >= sizeof sql)
+        return PERK_ERR_SQL;
 
+    sqlite3_stmt *st = NULL;
+    if (sqlite3_prepare16_v2(sqlite3 *db, const void *zSql, int nByte, sqlite3_stmt **ppStmt, const void **pzTail)
+
+
+                
+}
