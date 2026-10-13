@@ -90,6 +90,7 @@ static const char *err_name(PerkErr e)
     case PERK_ERR_NOMEM: return "ERR_NOMEM";
     case PERK_ERR_MISUSE: return "ERR_MISUSE";
     case PERK_ERR_EXISTS: return "ERR_EXISTS";
+    case PERK_ERR_NOT_FOUND: return "ERR_NOT_FOUND";
     }
     return "?";
 }
@@ -409,7 +410,8 @@ static void attack_where(void)
             snprintf(detail, sizeof(detail), "select=%s update=%s delete=%s%s%s", err_name(es), err_name(eu),
                      err_name(ed), intact ? "" : " DATABASE CHANGED", leaked ? " SECRET LEAKED" : "");
         }
-        else if (es == PERK_OK || eu == PERK_OK || ed == PERK_OK)
+        else if (es == PERK_OK || eu == PERK_OK || ed == PERK_OK || eu == PERK_ERR_NOT_FOUND ||
+                 ed == PERK_ERR_NOT_FOUND)
         {
             // Accepted clauses are plain filters on the users table (e.g. "OR id IS NOT NULL").
             // That's the caller's own logic, and it can't reach other tables.
@@ -537,10 +539,12 @@ static void fuzz(size_t iterations)
         }
         else
             e = perk_delete(db, "users", w, args, nq, NULL);
-        where_ok += e == PERK_OK;
+        // NOT_FOUND: a valid filter that matched no rows (update/delete)
+        int accepted = e == PERK_OK || e == PERK_ERR_NOT_FOUND;
+        where_ok += accepted;
 
         int intact = (i % 50 == 0) ? database_intact() : 1;
-        report(NULL, NULL, 0, leaked || !intact ? BREACHED : e == PERK_OK ? NEUTRALIZED : BLOCKED, NULL);
+        report(NULL, NULL, 0, leaked || !intact ? BREACHED : accepted ? NEUTRALIZED : BLOCKED, NULL);
         if (leaked || !intact)
             printf("  BREACH with where: %s\n", w);
     }

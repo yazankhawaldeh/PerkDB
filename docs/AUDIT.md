@@ -16,7 +16,6 @@ before they reach SQLite.
 
 The main gaps are:
 
-- Missing rows can't be detected: there is no `PERK_ERR_NOT_FOUND`.
 - Constraint violations can't be told apart from other SQL errors.
 - `perk_select` has no ordering or pagination.
 - There is no upsert, no bulk insert, no count, and no drop table.
@@ -32,9 +31,10 @@ The main gaps are:
 | `PERK_ERR_BADNAME` | Invalid table/column name, unsupported column type, or invalid name in a WHERE clause |
 | `PERK_ERR_NOMEM` | Allocation failure |
 | `PERK_ERR_MISUSE` | NULL handle, missing arguments, malformed `PerkValue`, bad WHERE syntax, `?` count mismatch, transaction misuse |
+| `PERK_ERR_EXISTS` | `perk_create_table`: the name is already taken |
+| `PERK_ERR_NOT_FOUND` | `perk_select_by_id` found no row; `perk_update` / `perk_delete` matched no rows |
 
-Gaps: there is no `PERK_ERR_NOT_FOUND`, which the backlog story "Complete insert / read /
-update / delete" needs. There is also no `PERK_ERR_CONSTRAINT`.
+Gaps: there is no `PERK_ERR_CONSTRAINT`.
 
 ## Public functions (`perkdb.h`)
 
@@ -67,7 +67,8 @@ update / delete" needs. There is also no `PERK_ERR_CONSTRAINT`.
 
 | Function | What it does | CRUD op | Known gaps |
 |---|---|---|---|
-| `perk_select(db, table, cols, ncols, where, args, nargs, &out)` | `SELECT` of the given columns (or `*`) with an optional whitelisted WHERE. Copies every row into a `PerkResult` | Read | No ORDER BY, LIMIT or OFFSET, so there is no pagination and everything is loaded into memory. No by-primary-key shortcut: the caller writes `"id = ?"` and checks the row count, and gets no `NOT_FOUND`. No COUNT/aggregates. No DISTINCT. No streaming or cursor API |
+| `perk_select(db, table, cols, ncols, where, args, nargs, &out)` | `SELECT` of the given columns (or `*`) with an optional whitelisted WHERE. Copies every row into a `PerkResult` | Read | No ORDER BY, LIMIT or OFFSET, so there is no pagination and everything is loaded into memory. A NULL or empty WHERE lists every row; a filter matching nothing is a 0-row `PERK_OK` result. No COUNT/aggregates. No DISTINCT. No streaming or cursor API |
+| `perk_select_by_id(db, table, cols, ncols, id_col, &id, &out)` | Reads the row(s) whose `id_col` equals the bound `id`. Returns `PERK_ERR_NOT_FOUND` (and `*out == NULL`) if none match | Read (by id) | A non-unique `id_col` returns every matching row. A `PERK_NULL` id never matches |
 | `perk_result_rows(res)` | Number of rows (0 if `res` is NULL) | Read | none |
 | `perk_result_cols(res)` | Number of columns (0 if `res` is NULL) | Read | none |
 | `perk_result_colname(res, col)` | Column name, or NULL if out of range | Read | No lookup of a column index by name |
@@ -78,13 +79,13 @@ update / delete" needs. There is also no `PERK_ERR_CONSTRAINT`.
 
 | Function | What it does | CRUD op | Known gaps |
 |---|---|---|---|
-| `perk_update(db, table, set_cols, set_vals, nset, where, args, nargs, &changed)` | `UPDATE ... SET col = ?` with an optional WHERE. Can report the number of changed rows | Update | When no row matches it returns `PERK_OK` with `changed == 0`, not a NOT_FOUND error. The WHERE is optional, so a NULL or empty WHERE updates every row with no explicit opt-in. Only `col = value` is possible: no expressions such as `count = count + ?`. Constraint violations are `PERK_ERR_SQL` |
+| `perk_update(db, table, set_cols, set_vals, nset, where, args, nargs, &changed)` | `UPDATE ... SET col = ?` with an optional WHERE. Can report the number of changed rows | Update | When no row matches (including an empty table) it returns `PERK_ERR_NOT_FOUND` with `changed == 0`. The WHERE is optional, so a NULL or empty WHERE updates every row with no explicit opt-in. Only `col = value` is possible: no expressions such as `count = count + ?`. Constraint violations are `PERK_ERR_SQL` |
 
 ### Delete (`perk_crud.c`)
 
 | Function | What it does | CRUD op | Known gaps |
 |---|---|---|---|
-| `perk_delete(db, table, where, args, nargs, &changed)` | `DELETE FROM` with an optional WHERE. Can report the number of deleted rows | Delete (row) | Same NOT_FOUND gap as update. A NULL WHERE deletes every row with no explicit opt-in. There is no `perk_drop_table`, so a table can't be deleted |
+| `perk_delete(db, table, where, args, nargs, &changed)` | `DELETE FROM` with an optional WHERE. Can report the number of deleted rows | Delete (row) | Returns `PERK_ERR_NOT_FOUND` with `changed == 0` when no row matches (including an empty table). A NULL WHERE deletes every row with no explicit opt-in. There is no `perk_drop_table`, so a table can't be deleted |
 
 ### Transactions (`perk_tx.c`)
 
@@ -108,7 +109,7 @@ Listed for completeness. Callers can't use these.
 | `perk_bind_values` | `perk_util.c` | Binds `PerkValue[]` with `sqlite3_bind_*` |
 | `perk_append_where` | `perk_where.c` | Tokenizes and rebuilds a WHERE clause against a whitelist |
 | `perk_result_from_stmt` | `perk_result.c` | Steps a statement and copies all rows into a `PerkResult` |
-| `check_names`, `prepare_sql`, `run_write`, `match_column_type` (static) | `perk_crud.c` | Name checks, prepare, step-to-done, and the column type whitelist |
+| `check_names`, `prepare_sql`, `run_write`, `match_column_type`, `begin_select`, `finish_select`, `not_found_if_unchanged` (static) | `perk_crud.c` | Name checks, prepare, step-to-done, the column type whitelist, shared SELECT building/running, and mapping 0 changed rows to `PERK_ERR_NOT_FOUND` |
 
 Note: `validate_identifier` has no `perk_` prefix even though it is an external symbol in
 the static library. It could collide with a symbol in a user's program.
@@ -124,11 +125,11 @@ the static library. It could collide with a symbol in a user's program.
 | Upsert / insert-or-replace | **Missing** |
 | Distinguish constraint violations | **Missing** (all are `PERK_ERR_SQL`) |
 | Read list-all / filtered | Done (`perk_select` with a NULL WHERE) |
-| Read by id with NOT_FOUND | Missing (backlog: "Complete insert / read / update / delete") |
+| Read by id with NOT_FOUND | Done (`perk_select_by_id`) |
 | Read with ORDER BY / LIMIT / OFFSET | **Missing** |
 | Count rows matching a filter | **Missing** |
-| Update with NOT_FOUND | Missing (backlog: "Complete insert / read / update / delete") |
-| Delete with NOT_FOUND | Missing (backlog: "Complete insert / read / update / delete") |
+| Update with NOT_FOUND | Done (`perk_update` returns `PERK_ERR_NOT_FOUND` when 0 rows change) |
+| Delete with NOT_FOUND | Done (`perk_delete` returns `PERK_ERR_NOT_FOUND` when 0 rows are deleted) |
 
 Items in **bold** have no backlog story yet. A new story was added for each one at the
 end of `BACKLOG.md`.

@@ -17,7 +17,7 @@ Indent acceptance criteria under each story so the testers and QA can check them
 - [x] Complete create-table
   - Creates a table from a caller-supplied schema; returns the error enum if it already exists or the name is invalid
   - Tests: happy path, duplicate table, invalid name, NULL args
-- [ ] Complete insert / read / update / delete
+- [x] Complete insert / read / update / delete
   - Read supports by-id and list-all; update/delete return a NOT_FOUND error for missing rows
   - Every op has happy-path, missing-row, and NULL/empty-input tests
 - [ ] SQL injection hardening

@@ -268,7 +268,7 @@ static void test_update(void)
     // Injection-shaped value is stored literally
     const char *misc[] = { "misc" };
     PerkValue evil[] = { perk_text("'; DELETE FROM users; --") };
-    CHECK_ERR(perk_update(db, "users", misc, evil, 1, "id = ?", where_args, 1, &changed), PERK_OK);
+    CHECK_ERR(perk_update(db, "users", misc, evil, 1, "id = ?", where_args, 1, &changed), PERK_ERR_NOT_FOUND);
     ASSERT_EQ_INT(changed, 0);
     ASSERT_EQ_INT(count_rows("users"), 4);
 

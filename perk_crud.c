@@ -249,6 +249,67 @@ PerkErr perk_insert(PerkDB *db, const char *table, const char **cols, const Perk
     return err;
 }
 
+/*
+ * Starts a SELECT statement: "SELECT <cols or *> FROM <table>". Names must already
+ * be validated; they are double-quoted, never pasted raw.
+ * @param db open handle (owns the builder's connection)
+ * @param table validated table name
+ * @param cols validated column names, or NULL when ncols is 0
+ * @param ncols number of columns; 0 selects every column
+ * @return a new builder; finish it with prepare_sql() or perk_discard_sql()
+ */
+static sqlite3_str *begin_select(PerkDB *db, const char *table, const char **cols, size_t ncols)
+{
+    sqlite3_str *s = sqlite3_str_new(db->conn);
+    sqlite3_str_appendall(s, "SELECT ");
+    if (ncols == 0)
+        sqlite3_str_appendchar(s, 1, '*');
+    for (size_t i = 0; i < ncols; i++)
+        sqlite3_str_appendf(s, "%s\"%w\"", i ? ", " : "", cols[i]);
+    sqlite3_str_appendf(s, " FROM \"%w\"", table);
+    return s;
+}
+
+/*
+ * Prepares a finished SELECT, binds args to parameters 1..nargs and copies every
+ * row into a new PerkResult.
+ * @param db open handle
+ * @param s SELECT builder; always freed
+ * @param args values for the statement's ? placeholders (may be NULL when nargs is 0)
+ * @param nargs number of args
+ * @param out receives the result on success (left NULL on failure)
+ * @return PERK_OK, or the prepare/bind/step error
+ */
+static PerkErr finish_select(PerkDB *db, sqlite3_str *s, const PerkValue *args, size_t nargs, PerkResult **out)
+{
+    sqlite3_stmt *st = NULL;
+    PerkErr err = prepare_sql(db, s, &st);
+    if (err != PERK_OK)
+        return err;
+
+    err = perk_bind_values(db, st, args, nargs, 1);
+    if (err == PERK_OK)
+        err = perk_result_from_stmt(db, st, out);
+    sqlite3_finalize(st);
+    return err;
+}
+
+/*
+ * Turns a successful write that touched no rows into PERK_ERR_NOT_FOUND.
+ * @param db open handle (receives the error message)
+ * @param fn public function name for the message
+ * @param err result of run_write()
+ * @param changed number of rows the statement changed
+ * @return err unchanged if it is an error or changed > 0, else PERK_ERR_NOT_FOUND
+ */
+static PerkErr not_found_if_unchanged(PerkDB *db, const char *fn, PerkErr err, int64_t changed)
+{
+    if (err != PERK_OK || changed > 0)
+        return err;
+    snprintf(db->errmsg, sizeof(db->errmsg), "%s: no rows matched", fn);
+    return PERK_ERR_NOT_FOUND;
+}
+
 PerkErr perk_select(PerkDB *db, const char *table, const char **cols, size_t ncols, const char *where, const PerkValue *args, size_t nargs, PerkResult **out)
 {
     if (out != NULL)
@@ -264,31 +325,52 @@ PerkErr perk_select(PerkDB *db, const char *table, const char **cols, size_t nco
     if (err != PERK_OK)
         return err;
 
-    sqlite3_str *s = sqlite3_str_new(db->conn);
-    sqlite3_str_appendall(s, "SELECT ");
-    if (ncols == 0)
-        sqlite3_str_appendchar(s, 1, '*');
-    for (size_t i = 0; i < ncols; i++)
-        sqlite3_str_appendf(s, "%s\"%w\"", i ? ", " : "", cols[i]);
-    sqlite3_str_appendf(s, " FROM \"%w\"", table);
-
+    sqlite3_str *s = begin_select(db, table, cols, ncols);
     err = perk_append_where(db, s, where, nargs);
     if (err != PERK_OK)
     {
         perk_discard_sql(s);
         return err;
     }
+    return finish_select(db, s, args, nargs, out);
+}
 
-    sqlite3_stmt *st = NULL;
-    err = prepare_sql(db, s, &st);
+PerkErr perk_select_by_id(PerkDB *db, const char *table, const char **cols, size_t ncols,
+                          const char *id_col, const PerkValue *id, PerkResult **out)
+{
+    if (out != NULL)
+        *out = NULL;
+    if (db == NULL)
+        return PERK_ERR_MISUSE;
+    if (table == NULL || id_col == NULL || id == NULL || out == NULL || (ncols > 0 && cols == NULL))
+    {
+        perk_set_error(db, "perk_select_by_id: table, id_col, id and out are required, and cols must be set when ncols > 0");
+        return PERK_ERR_MISUSE;
+    }
+    PerkErr err = check_names(db, "perk_select_by_id", table, cols, ncols);
     if (err != PERK_OK)
         return err;
+    if (!validate_identifier(id_col))
+    {
+        perk_set_error(db, "perk_select_by_id: invalid id column name");
+        return PERK_ERR_BADNAME;
+    }
 
-    err = perk_bind_values(db, st, args, nargs, 1);
-    if (err == PERK_OK)
-        err = perk_result_from_stmt(db, st, out);
-    sqlite3_finalize(st);
-    return err;
+    sqlite3_str *s = begin_select(db, table, cols, ncols);
+    sqlite3_str_appendf(s, " WHERE \"%w\" = ?", id_col);
+
+    PerkResult *res = NULL;
+    err = finish_select(db, s, id, 1, &res);
+    if (err != PERK_OK)
+        return err;
+    if (perk_result_rows(res) == 0)
+    {
+        perk_result_free(res);
+        perk_set_error(db, "perk_select_by_id: no row with that id");
+        return PERK_ERR_NOT_FOUND;
+    }
+    *out = res;
+    return PERK_OK;
 }
 
 PerkErr perk_update(PerkDB *db, const char *table, const char **set_cols, const PerkValue *set_vals, size_t nset,
@@ -332,7 +414,11 @@ PerkErr perk_update(PerkDB *db, const char *table, const char **set_cols, const 
         sqlite3_finalize(st);
         return err;
     }
-    return run_write(db, st, changed);
+    int64_t n = 0;
+    err = run_write(db, st, &n);
+    if (err == PERK_OK && changed != NULL)
+        *changed = n;
+    return not_found_if_unchanged(db, "perk_update", err, n);
 }
 
 PerkErr perk_delete(PerkDB *db, const char *table, const char *where, const PerkValue *args, size_t nargs, int64_t *changed)
@@ -369,5 +455,9 @@ PerkErr perk_delete(PerkDB *db, const char *table, const char *where, const Perk
         sqlite3_finalize(st);
         return err;
     }
-    return run_write(db, st, changed);
+    int64_t n = 0;
+    err = run_write(db, st, &n);
+    if (err == PERK_OK && changed != NULL)
+        *changed = n;
+    return not_found_if_unchanged(db, "perk_delete", err, n);
 }
