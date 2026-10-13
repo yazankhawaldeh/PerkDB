@@ -16,7 +16,7 @@ ifeq ($(shell uname -s),Linux)
 LDLIBS += -ldl
 endif
 
-.PHONY: all shell test bench clean
+.PHONY: all shell test test-addon bench clean
 
 # Static library containing PerkDB and SQLite; link apps with: build/libperkdb.a -lpthread -lm
 all: $(LIB)
@@ -52,6 +52,15 @@ test: $(TESTS:%=$(BUILD)/%)
 	    ./$(BUILD)/$(t) $(ARGS_$(t)) || failed="$$failed $(t)";) \
 	if [ -n "$$failed" ]; then echo "FAILED test suites:$$failed"; exit 1; fi; \
 	echo "All test suites passed: $(TESTS)"
+
+# Node addon smoke test. Needs the addon built first (`npm run build`); it is
+# deliberately not part of `make test`, which must not require node.
+test-addon:
+	@if [ ! -f $(BUILD)/Release/perkdb.node ]; then \
+	    echo "test-addon: $(BUILD)/Release/perkdb.node is missing; run 'npm install' or 'npm run build' first" >&2; \
+	    exit 1; \
+	fi
+	node tests/test_addon.js
 
 $(BUILD)/test_%: tests/test_%.c tests/test_harness.h $(SRCS) perkdb.h perk_internal.h $(SQLITE_OBJ) | $(BUILD)
 	$(CC) $(WARN) $(SAN) -I. $< $(SRCS) $(SQLITE_OBJ) -o $@ $(LDLIBS)

@@ -7,3 +7,4 @@ build/
 *.db-wal
 *.db-shm
 tests/bin/
+node_modules/

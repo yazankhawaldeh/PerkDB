@@ -1,0 +1,36 @@
+{
+  "name": "perkdb",
+  "version": "0.1.0",
+  "description": "Node native addon for PerkDB, a thin C wrapper over SQLite",
+  "main": "index.js",
+  "gypfile": true,
+  "files": [
+    "index.js",
+    "binding.gyp",
+    "addon/",
+    "perkdb.h",
+    "perk_internal.h",
+    "perkdb.c",
+    "perk_crud.c",
+    "perk_result.c",
+    "perk_tx.c",
+    "perk_util.c",
+    "perk_where.c",
+    "sqlite3-src/sqlite3.c",
+    "sqlite3-src/sqlite3.h",
+    "sqlite3-src/sqlite3ext.h"
+  ],
+  "scripts": {
+    "install": "node-gyp rebuild",
+    "build": "node-gyp rebuild",
+    "test": "node tests/test_addon.js"
+  },
+  "engines": {
+    "node": "^18.17.0 || >=20.5.0"
+  },
+  "dependencies": {
+    "node-addon-api": "^8.0.0",
+    "node-gyp": "^11.0.0"
+  },
+  "license": "UNLICENSED"
+}

@@ -27,7 +27,7 @@ Indent acceptance criteria under each story so the testers and QA can check them
 - [x] Memory safety pass
   - Full test suite runs clean under ASan/UBSan (zero reports)
   - Tests cover oversized strings, empty strings, max-length identifiers, and NULL pointers for every function
-- [ ] Node addon: build and load
+- [x] Node addon: build and load
   - node-addon-api + node-gyp; `npm install && node -e "require('./')"` works on macOS and Linux
 - [ ] Node addon: expose CRUD functions
   - Every C function is callable from JS; C error enums become thrown Errors with a `code` property
