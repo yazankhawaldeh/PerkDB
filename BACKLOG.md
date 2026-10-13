@@ -24,7 +24,7 @@ Indent acceptance criteria under each story so the testers and QA can check them
   - Every value goes through sqlite3_bind_*; no user data is ever formatted into SQL text
   - Table/column names are validated against ^[A-Za-z_][A-Za-z0-9_]{0,63}$ and rejected otherwise
   - Tests feed payloads like `'; DROP TABLE x;--` and `" OR 1=1` to every function and confirm the data is unchanged
-- [ ] Memory safety pass
+- [x] Memory safety pass
   - Full test suite runs clean under ASan/UBSan (zero reports)
   - Tests cover oversized strings, empty strings, max-length identifiers, and NULL pointers for every function
 - [ ] Node addon: build and load

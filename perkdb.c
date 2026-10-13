@@ -44,12 +44,15 @@ static int harden_connection(sqlite3 *conn)
 PerkErr perk_open(const char *path, PerkDB **out)
 {
     set_open_error("");
+    if (out != NULL)
+    {
+        *out = NULL;
+    }
     if (out == NULL || path == NULL)
     {
         set_open_error("perk_open: path and out are required");
         return PERK_ERR_MISUSE;
     }
-    *out = NULL;
 
     PerkDB *db = calloc(1, sizeof(*db));
     if (db == NULL)

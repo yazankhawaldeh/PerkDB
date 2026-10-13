@@ -46,7 +46,8 @@ PerkErr perk_finish_sql(PerkDB *db, sqlite3_str *s, char **out);
 // Frees s without using its contents, for error paths
 void perk_discard_sql(sqlite3_str *s);
 
-// Binds vals to parameters first_index .. first_index + n - 1
+// Binds vals to parameters first_index .. first_index + n - 1. Text/blob lengths
+// above SQLITE_LIMIT_LENGTH are rejected (PERK_ERR_SQL) before SQLite sees them.
 PerkErr perk_bind_values(PerkDB *db, sqlite3_stmt *st, const PerkValue *vals, size_t n, int first_index);
 
 // Validates a user WHERE clause and appends it to s (perk_where.c)

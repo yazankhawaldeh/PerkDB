@@ -182,3 +182,66 @@ Connection hardening added in `perk_open`: `SQLITE_DBCONFIG_DEFENSIVE` on,
 
 Behavior changes: the two WHERE forms above are now rejected; opened databases can't
 use writable_schema, load_extension or ATTACH (none were reachable through the API).
+
+## Memory safety pass (story "Memory safety pass", 2026-10-12)
+
+Every public function was checked for NULL pointer handling, integer overflow in sizes,
+use-after-free / double-free, and uninitialized out-params. The full suite was then run
+under ASan/UBSan (`make clean && make && make test`) with zero reports. LeakSanitizer
+(`ASAN_OPTIONS=detect_leaks=1`) is not supported by Apple clang's ASan on macOS
+("detect_leaks is not supported on this platform"), so every suite was also built
+without sanitizers and run under `leaks --atExit`: 0 leaks in every suite. valgrind is
+not installed.
+
+### Defect fixed: over-read on text/blob lengths >= 2^63
+
+`PerkValue.as.text.len` / `as.blob.len` are `size_t`, but SQLite's `bindText()` takes
+the length as a signed `i64`. A length >= 2^63 (for example `SIZE_MAX`, a common "unknown
+length" value) turned negative inside SQLite:
+
+- `PERK_TEXT`: SQLite then called `strlen()` on the pointer. On a buffer with no NUL this
+  read past the end (ASan: stack-buffer-overflow in `sqlite3VdbeMemSetText`). On a
+  NUL-terminated buffer the length was silently replaced by `strlen`.
+- `PERK_BLOB`: SQLite then scanned the pointer as UTF-16 looking for a terminator and
+  memcpy'd the result (ASan: stack-buffer-overflow in `sqlite3VdbeMemSetStr`).
+
+Fix (`perk_util.c`, `check_value_length()`, called from `perk_bind_values()` before each
+text/blob bind): a length larger than the connection's `SQLITE_LIMIT_LENGTH` (default
+1,000,000,000 bytes) now returns `PERK_ERR_SQL` with the message
+`"PERK_TEXT value is too big (N bytes, limit L)"` (or `PERK_BLOB`). The pointer is
+not read. This covers insert, select args, select_by_id id, update set values and
+WHERE args, and delete args.
+
+Lengths from `INT_MAX + 1` up to 2^63 - 1 were already handled correctly by SQLite
+(`SQLITE_TOOBIG`, which became `PERK_ERR_SQL`). Now they hit the same up-front check and get
+a clearer message. A length at or just under the limit passes this check, but
+SQLite can still reject the whole row as too big at step time (`PERK_ERR_SQL`, "string
+or blob too big") because the row has some per-record overhead.
+
+### Verdicts per public function
+
+| Function | Verdict | Evidence |
+|---|---|---|
+| `perk_open` | Safe. NULL `path`/`out` give `PERK_ERR_MISUSE` with a message. `*out = NULL` on every later failure. Each failure path closes the connection and frees the handle | `perkdb.c:44-91` |
+| `perk_close` | Safe. NULL is ignored. Every function finalizes its statements, so `sqlite3_close` cannot return BUSY and leak. An open transaction is rolled back. A double close is a caller error and can't be detected (the handle is freed) | `perkdb.c:94-105` |
+| `perk_errmsg` | Safe. NULL returns the per-thread `_Thread_local` buffer. A handle's buffer lives until `perk_close`. Every write uses `snprintf` bounded by `sizeof` (truncates at 255 bytes) | `perkdb.c:7,107-112`, `perk_util.c:33-36` |
+| `perk_int/real/null/text/blob` | Safe. `perk_text(NULL)` becomes `PERK_NULL`. `perk_blob(NULL, n>0)` is rejected at bind (`PERK_ERR_MISUSE`). Oversized lengths are rejected (fixed above) | `perkdb.h`, `perk_util.c:118-145` |
+| `perk_create_table` | Safe. NULL db/table/cols and `ncols == 0` give MISUSE. A NULL column name gives BADNAME (`validate_identifier` accepts NULL). The type-name buffer and messages use bounded `snprintf`. An oversized statement or OOM in `sqlite3_str` is caught by `perk_finish_sql` (TOOBIG gives SQL, OOM gives NOMEM) | `perk_crud.c:151-237`, `perk_util.c:53-69` |
+| `perk_insert` | Safe. NULL db/table/cols/vals and `n == 0` give MISUSE. A NULL `cols[i]` gives BADNAME. `rowid_out` may be NULL, is written only on success and is left unchanged on failure (the existing tests pin this) | `perk_crud.c:239-276` |
+| `perk_select` | Safe. `*out = NULL` first whenever `out` is non-NULL. Counts > 0 with NULL arrays give MISUSE | `perk_crud.c:339-362` |
+| `perk_select_by_id` | Safe. Same `*out` handling. A 0-row result is freed before `PERK_ERR_NOT_FOUND` | `perk_crud.c:364-400` |
+| `perk_update` | Safe. `(int)nset + 1` can't overflow: the first `perk_bind_values` call rejects `nset > INT_MAX - 1` first. `changed` may be NULL and is left unchanged on failures other than NOT_FOUND | `perk_crud.c:402-448`, `perk_util.c:98` |
+| `perk_delete` | Safe. Same as update | `perk_crud.c:450-489` |
+| WHERE parsing | Safe. Words longer than 64 characters are rejected before the `memcpy` into the 65-byte buffer. The scan stops at the NUL | `perk_where.c:118-131` |
+| `perk_result_rows/cols/colname/get` | Safe. A NULL result or an out-of-range row/col (including `SIZE_MAX`) returns 0/NULL. Pointers stay valid until `perk_result_free` | `perk_result.c:164-186` |
+| `perk_result_free` | Safe. NULL is ignored. Partial results are freed cleanly because each row is zeroed (`PERK_NULL`) before it is filled. Double free is a caller error | `perk_result.c:13-29,138-145` |
+| Result building | Safe. Growth is guarded by `new_cap > SIZE_MAX / sizeof(PerkValue) / ncols`. `len + 1` in `copy_text` can't overflow (len is an `int` from SQLite). A zero-length blob is stored as `{NULL, 0}` | `perk_result.c:32-40,126-136` |
+| `perk_begin/commit/rollback` | Safe. NULL db gives MISUSE (no message, as documented above) | `perk_tx.c:14-49` |
+
+### Behavior changes
+
+- A `PERK_TEXT`/`PERK_BLOB` value whose `len` is larger than `SQLITE_LIMIT_LENGTH` now
+  returns `PERK_ERR_SQL` before SQLite reads the pointer. Before, a length >= 2^63 read out of
+  bounds, and a length in `(limit, 2^63)` already returned `PERK_ERR_SQL`, with SQLite's message.
+- No other behavior changed. The header now spells out that `rowid_out` / `changed` are left
+  unchanged on failure (except `changed = 0` on `PERK_ERR_NOT_FOUND`).

@@ -96,7 +96,9 @@ typedef struct PerkResult PerkResult;
  *  - Table and column names must match ^[A-Za-z_][A-Za-z0-9_]{0,63}$ (ASCII only)
  *    and not start with "sqlite_" (any case). Anything else is PERK_ERR_BADNAME.
  *  - Values are always passed as PerkValues and bound as parameters, never
- *    pasted into SQL.
+ *    pasted into SQL. A PERK_TEXT/PERK_BLOB whose len is larger than SQLite's
+ *    length limit (SQLITE_LIMIT_LENGTH, 1,000,000,000 bytes by default) is
+ *    PERK_ERR_SQL; the pointer is not read. len must not exceed the real buffer.
  *  - where is a restricted filter, e.g. "age >= ? AND (name = ? OR name IS NULL)".
  *    It may contain column names, ? placeholders, = == != <> < <= > >=, ( ) ,
  *    and the keywords AND OR NOT IS NULL LIKE GLOB IN BETWEEN, separated by
@@ -110,7 +112,7 @@ typedef struct PerkResult PerkResult;
  *  - On failure, perk_errmsg() describes what went wrong.
  */
 
-// On failure *out is NULL and perk_errmsg(NULL) holds the reason (per thread)
+// On failure *out is NULL (if out is non-NULL) and perk_errmsg(NULL) holds the reason (per thread)
 PerkErr perk_open(const char *path, PerkDB **out);
 
 void perk_close(PerkDB *db);
@@ -126,7 +128,7 @@ PerkErr perk_create_table(PerkDB*, const char *table, const PerkColumn *cols, si
 
 /*
  * Inserts one row. cols[i] receives vals[i].
- * @param rowid_out may be NULL; receives the new row's rowid
+ * @param rowid_out may be NULL; receives the new row's rowid; left unchanged on failure
  * @return PERK_OK, PERK_ERR_MISUSE (NULL db/table/cols/vals or n == 0),
  *         PERK_ERR_BADNAME (invalid or "" table/column name), or PERK_ERR_SQL
  *         (e.g. missing table, constraint violation)
@@ -162,7 +164,8 @@ PerkErr perk_select_by_id(PerkDB*, const char *table, const char **cols, size_t 
 
 /*
  * Sets set_cols = set_vals on every row matching where. A NULL or "" where updates every row.
- * @param changed may be NULL; receives the number of rows changed (0 on PERK_ERR_NOT_FOUND)
+ * @param changed may be NULL; receives the number of rows changed (0 on PERK_ERR_NOT_FOUND;
+ *        left unchanged on any other failure)
  * @return PERK_OK if at least one row changed, PERK_ERR_NOT_FOUND if no row matched
  *         (including an empty table), PERK_ERR_MISUSE, PERK_ERR_BADNAME, or PERK_ERR_SQL
  */
@@ -171,7 +174,8 @@ PerkErr perk_update (PerkDB*, const char *table, const char **set_cols, const Pe
 
 /*
  * Deletes every row matching where. A NULL or "" where deletes every row.
- * @param changed may be NULL; receives the number of rows deleted (0 on PERK_ERR_NOT_FOUND)
+ * @param changed may be NULL; receives the number of rows deleted (0 on PERK_ERR_NOT_FOUND;
+ *        left unchanged on any other failure)
  * @return PERK_OK if at least one row was deleted, PERK_ERR_NOT_FOUND if no row matched
  *         (including an empty table), PERK_ERR_MISUSE, PERK_ERR_BADNAME, or PERK_ERR_SQL
  */

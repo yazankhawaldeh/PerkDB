@@ -73,6 +73,26 @@ void perk_discard_sql(sqlite3_str *s)
     sqlite3_free(sqlite3_str_finish(s));
 }
 
+/*
+ * Rejects a text/blob length SQLite can't store before it reaches sqlite3_bind_*64.
+ * SQLite takes those lengths as a signed 64-bit count, so a size_t >= 2^63 would turn
+ * negative and be read as "NUL-terminated" (strlen / a scan past the caller's buffer).
+ * Checking against SQLITE_LIMIT_LENGTH up front keeps every length in range and gives
+ * one clear error for oversized values.
+ * @param db open handle (receives the error message)
+ * @param what "PERK_TEXT" or "PERK_BLOB", for the message
+ * @param len byte length from the PerkValue
+ * @return PERK_OK, or PERK_ERR_SQL if len exceeds the connection's SQLITE_LIMIT_LENGTH
+ */
+static PerkErr check_value_length(PerkDB *db, const char *what, size_t len)
+{
+    int limit = sqlite3_limit(db->conn, SQLITE_LIMIT_LENGTH, -1);
+    if (limit >= 0 && len <= (size_t)limit)
+        return PERK_OK;
+    snprintf(db->errmsg, sizeof(db->errmsg), "%s value is too big (%zu bytes, limit %d)", what, len, limit);
+    return PERK_ERR_SQL;
+}
+
 PerkErr perk_bind_values(PerkDB *db, sqlite3_stmt *st, const PerkValue *vals, size_t n, int first_index)
 {
     if (first_index < 1 || n > (size_t)(INT_MAX - first_index))
@@ -103,6 +123,8 @@ PerkErr perk_bind_values(PerkDB *db, sqlite3_stmt *st, const PerkValue *vals, si
                 perk_set_error(db, "PERK_TEXT value has a NULL pointer");
                 return PERK_ERR_MISUSE;
             }
+            if (check_value_length(db, "PERK_TEXT", v->as.text.len) != PERK_OK)
+                return PERK_ERR_SQL;
             rc = sqlite3_bind_text64(st, idx, v->as.text.ptr, v->as.text.len,
                                      SQLITE_TRANSIENT, SQLITE_UTF8);
             break;
@@ -112,6 +134,8 @@ PerkErr perk_bind_values(PerkDB *db, sqlite3_stmt *st, const PerkValue *vals, si
                 perk_set_error(db, "PERK_BLOB value has a NULL pointer");
                 return PERK_ERR_MISUSE;
             }
+            if (check_value_length(db, "PERK_BLOB", v->as.blob.len) != PERK_OK)
+                return PERK_ERR_SQL;
             if (v->as.blob.ptr == NULL)
                 rc = sqlite3_bind_zeroblob64(st, idx, 0);
             else
