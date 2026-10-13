@@ -2,6 +2,13 @@
 
 ## Description
 This is a rudimentary CRUD API to write to a single file SQLite amalgamation database. This offers exceptional performance for small projects, and the API is written in C for super fast writes. This can be an alternative to PostgreSQL or other databases.
+## Building
+- `make` builds `build/libperkdb.a`, which contains PerkDB and SQLite
+- `make shell` builds the `build/sqlite3` command-line shell for inspecting database files
+- `make test` builds and runs the test suite with AddressSanitizer and UndefinedBehaviorSanitizer
+- `make clean` removes `build/`
+
+Link your program with: `cc app.c build/libperkdb.a -lpthread -lm` (add `-ldl` on Linux)
 ## What can this be used for?
 This can be used for pretty much anything that requires a database and needs an easy way to interact with it. This project allows for super fast database handling, especially for embedded targets since the size is small and its a compiled binary. This is also good for small to medium scale web services and cuts out a need for a more complex databasde management system.
 ## What is the current state of the project?

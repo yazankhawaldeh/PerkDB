@@ -1,0 +1,9 @@
+build/
+*.o
+*.a
+*.dylib
+*.so
+*.db
+*.db-wal
+*.db-shm
+tests/bin/

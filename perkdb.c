@@ -1,48 +1,49 @@
-#include "perkdb.h"
-#include "sqlite3-src/sqlite3.h"
+#include "perk_internal.h"
 #include <stdio.h>
 #include <stdlib.h>
-struct PerkDB
-{
-    sqlite3 *conn;
-    char errmsg[256];
-    int in_transaction;
-};
 
-struct PerkResult
+// perk_open() has no handle to store its error in when it fails, so the message for
+// the last failed open on this thread is kept here and read with perk_errmsg(NULL).
+static _Thread_local char open_errmsg[256];
+
+static void set_open_error(const char *msg)
 {
-    size_t nrows, ncols;
-    char **col_names;
-    PerkValue *cells;
-};
+    snprintf(open_errmsg, sizeof(open_errmsg), "%s", msg ? msg : "");
+}
 
 PerkErr perk_open(const char *path, PerkDB **out)
 {
+    set_open_error("");
     if (out == NULL || path == NULL)
     {
-        return PERK_ERR_OPEN;
+        set_open_error("perk_open: path and out are required");
+        return PERK_ERR_MISUSE;
     }
     *out = NULL;
 
     PerkDB *db = calloc(1, sizeof(*db));
     if (db == NULL)
+    {
+        set_open_error("out of memory");
         return PERK_ERR_NOMEM;
+    }
 
     if (sqlite3_open(path, &db->conn) != SQLITE_OK)
     {
+        set_open_error(db->conn ? sqlite3_errmsg(db->conn) : "out of memory");
         sqlite3_close(db->conn);
         free(db);
         return PERK_ERR_OPEN;
     }
 
-    const char *pragmas = 
+    const char *pragmas =
         "PRAGMA journal_mode = WAL;"
         "PRAGMA busy_timeout = 5000;"
-        "PRAGMA foreign_keys = ON"
-        "PRAGMA synchronous = NORMAL";
+        "PRAGMA foreign_keys = ON;"
+        "PRAGMA synchronous = NORMAL;";
     if (sqlite3_exec(db->conn, pragmas, NULL, NULL, NULL) != SQLITE_OK)
     {
-        snprintf(db->errmsg, sizeof(db->errmsg), "%s", sqlite3_errmsg(db->conn));
+        set_open_error(sqlite3_errmsg(db->conn));
         sqlite3_close(db->conn);
         free(db);
         return PERK_ERR_OPEN;
@@ -59,59 +60,15 @@ void perk_close(PerkDB *db)
         return;
     }
 
+    // Every function finalizes its statements, so this always succeeds;
+    // an open transaction is rolled back.
     sqlite3_close(db->conn);
     free(db);
 }
 
-PerkErr perk_insert(PerkDB *db, const char *table, const char **cols, const PerkValue *vals, size_t n, int64_t *rowid_out)
+const char *perk_errmsg(PerkDB *db)
 {
-    if (db == NULL || table == NULL || cols == NULL || vals == NULL || n == 0)
-    {
-        return PERK_ERR_SQL;
-    }
-    if (!validate_identifier(table))
-        return PERK_ERR_BADNAME;
-    for (size_t i = 0; i < n; i++)
-        if(!validate_identifier(cols[i]))
-            return PERK_ERR_BADNAME;
-    char sql[1024];
-    size_t off = (size_t)snprintf(sql, sizeof(sql), "INSERT INTO %s (", table);
-    for (size_t i = 0; i < n; i++)
-        off += (size_t)snprintf(sql + off, sizeof(sql) - off, "%s%s",
-                i ? ", " : "", cols[i]);
-    off += (size_t)snprintf(sql + off, sizeof(sql) - off, ") VALUES (");
-    for (size_t i = 0; i < n; i++)
-        off += (size_t)snprintf(sql + off, sizeof(sql) - off, "%s?",
-                i ? ", " : "");
-    off += (size_t)snprintf(sql + off, sizeof sql - off, ")");
-    if (off >= sizeof sql)
-        return PERK_ERR_SQL;
-
-    sqlite3_stmt *st = NULL;
-    if (sqlite3_prepare16_v2(db->conn, sql, -1, &st, NULL) != SQLITE_OK) {
-        snprintf(db->errmsg, sizeof(db->errmsg), "%s", sqlite3_errmsg(db->conn));
-        return PERK_ERR_SQL;
-    }
-
-    for (size_t i = 0; i < n; i++) {
-        if (bind_value(st,(int)i + 1, &vals[i]) != SQLITE_OK)
-        {
-            snprintf(db->errmsg, sizeof(db->errmsg), "%s", sqlite3_errmsg(db->conn));
-            sqlite3_finalize(st);
-            return PERK_ERR_SQL;
-        }
-    }
-    int rc = sqlite3_step(st);
-    sqlite3_finalize(st);
-    if (rc != SQLITE_DONE) {
-        snprintf(db->errmsg, sizeof(db->errmsg), "%s", sqlite3_errmsg(db->conn));
-        return rc == SQLITE_BUSY ? PERK_ERR_BUSY : PERK_ERR_SQL;
-    }
-
-    if (rowid_out)
-        *rowid_out = sqlite3_last_insert_rowid(db->conn);
-    return PERK_OK;
-
-
-                
+    if (db == NULL)
+        return open_errmsg;
+    return db->errmsg;
 }

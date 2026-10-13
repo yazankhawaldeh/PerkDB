@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(make *)", "Bash(clang *)", "Bash(cc *)", "Bash(clang-format *)",
+      "Bash(./build/*)", "Bash(git add *)", "Bash(git commit *)",
+      "Bash(git status)", "Bash(git diff *)", "Bash(git push)"
+    ],
+    "deny": ["Bash(git push --force *)", "Bash(git push -f *)", "Bash(rm -rf *)"]
+  }
+}
