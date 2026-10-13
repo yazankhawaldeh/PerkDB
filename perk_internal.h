@@ -27,7 +27,12 @@ struct PerkResult
 int perk_is_ident_start(char c);
 int perk_is_ident_char(char c);
 
-// Returns 1 if name matches [A-Za-z_][A-Za-z0-9_]* and is not reserved, 0 otherwise
+/*
+ * Checks a table/column name against ^[A-Za-z_][A-Za-z0-9_]{0,63}$ (ASCII only, no
+ * locale-dependent ctype calls) and rejects the reserved "sqlite_" prefix (any case).
+ * @param name NUL-terminated name, may be NULL
+ * @return 1 if the name is valid, 0 otherwise (NULL, "", too long, bad byte, reserved)
+ */
 int validate_identifier(const char *name);
 
 void perk_set_error(PerkDB *db, const char *msg);

@@ -93,15 +93,20 @@ typedef struct PerkResult PerkResult;
 
 /*
  * Input rules shared by every function:
- *  - Table and column names must match [A-Za-z_][A-Za-z0-9_]*, be at most 64
- *    characters, and not start with "sqlite_". Anything else is PERK_ERR_BADNAME.
+ *  - Table and column names must match ^[A-Za-z_][A-Za-z0-9_]{0,63}$ (ASCII only)
+ *    and not start with "sqlite_" (any case). Anything else is PERK_ERR_BADNAME.
  *  - Values are always passed as PerkValues and bound as parameters, never
  *    pasted into SQL.
  *  - where is a restricted filter, e.g. "age >= ? AND (name = ? OR name IS NULL)".
  *    It may contain column names, ? placeholders, = == != <> < <= > >=, ( ) ,
- *    and the keywords AND OR NOT IS NULL LIKE GLOB IN BETWEEN. Literals, quotes,
- *    ;, comments and functions are rejected: pass every value through args.
+ *    and the keywords AND OR NOT IS NULL LIKE GLOB IN BETWEEN, separated by
+ *    space, tab, CR or LF. IN must be followed by '(' and LIKE/GLOB must follow a
+ *    column, ? or ')'. Literals, quotes, ;, comments, functions, other whitespace
+ *    and non-ASCII bytes are rejected (PERK_ERR_MISUSE; a bad or "sqlite_" column
+ *    name is PERK_ERR_BADNAME): pass every value through args.
  *    The number of ?s must equal nargs. NULL or "" matches every row.
+ *  - Connections are opened with SQLite's defensive mode on, load_extension off,
+ *    untrusted schema functions off and ATTACH disabled.
  *  - On failure, perk_errmsg() describes what went wrong.
  */
 

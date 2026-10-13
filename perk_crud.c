@@ -24,18 +24,44 @@ static PerkErr check_names(PerkDB *db, const char *fn, const char *table, const 
     return PERK_OK;
 }
 
-// Finishes s (always freeing it) and prepares the result into *st
+/*
+ * Finishes s (always freeing it) and prepares exactly one statement from it.
+ * The generated SQL can never hold a ';' (names are validated and quoted, WHERE
+ * text is rebuilt), but as defense in depth any text left after the first
+ * statement is refused rather than silently ignored.
+ * @param db open handle
+ * @param s SQL builder; always freed
+ * @param st receives the prepared statement (NULL on failure)
+ * @return PERK_OK, the builder/prepare error, or PERK_ERR_MISUSE if the SQL held
+ *         more than one statement
+ */
 static PerkErr prepare_sql(PerkDB *db, sqlite3_str *s, sqlite3_stmt **st)
 {
+    *st = NULL;
     char *sql = NULL;
     PerkErr err = perk_finish_sql(db, s, &sql);
     if (err != PERK_OK)
         return err;
 
-    int rc = sqlite3_prepare_v2(db->conn, sql, -1, st, NULL);
+    const char *tail = NULL;
+    int rc = sqlite3_prepare_v2(db->conn, sql, -1, st, &tail);
+    int extra = 0;
+    if (rc == SQLITE_OK && tail != NULL)
+    {
+        while (*tail == ' ' || *tail == '\t' || *tail == '\n' || *tail == '\r')
+            tail++;
+        extra = *tail != '\0';
+    }
     sqlite3_free(sql);
     if (rc != SQLITE_OK)
         return perk_sqlite_error(db, rc);
+    if (extra || *st == NULL)
+    {
+        sqlite3_finalize(*st);
+        *st = NULL;
+        perk_set_error(db, "generated SQL must be exactly one statement");
+        return PERK_ERR_MISUSE;
+    }
     return PERK_OK;
 }
 

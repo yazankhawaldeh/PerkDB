@@ -20,7 +20,7 @@ Indent acceptance criteria under each story so the testers and QA can check them
 - [x] Complete insert / read / update / delete
   - Read supports by-id and list-all; update/delete return a NOT_FOUND error for missing rows
   - Every op has happy-path, missing-row, and NULL/empty-input tests
-- [ ] SQL injection hardening
+- [x] SQL injection hardening
   - Every value goes through sqlite3_bind_*; no user data is ever formatted into SQL text
   - Table/column names are validated against ^[A-Za-z_][A-Za-z0-9_]{0,63}$ and rejected otherwise
   - Tests feed payloads like `'; DROP TABLE x;--` and `" OR 1=1` to every function and confirm the data is unchanged

@@ -52,7 +52,7 @@ Gaps: there is no `PERK_ERR_CONSTRAINT`.
 
 | Function | What it does | CRUD op | Known gaps |
 |---|---|---|---|
-| `perk_open(path, &out)` | Allocates a `PerkDB`, opens the file and sets WAL, `busy_timeout=5000`, `foreign_keys=ON` and `synchronous=NORMAL`. On failure `*out` is NULL and the message goes to a thread-local buffer | Lifecycle | No open flags (read-only, no-create) and no way to pick PRAGMAs. WAL can't be used with `:memory:`, but the PRAGMA result is not checked for that, so this is harmless |
+| `perk_open(path, &out)` | Allocates a `PerkDB`, opens the file, hardens the connection (defensive mode, load_extension off, TRUSTED_SCHEMA off, DQS off, ATTACH limit 0) and sets WAL, `busy_timeout=5000`, `foreign_keys=ON` and `synchronous=NORMAL`. On failure `*out` is NULL and the message goes to a thread-local buffer | Lifecycle | No open flags (read-only, no-create) and no way to pick PRAGMAs. WAL can't be used with `:memory:`, but the PRAGMA result is not checked for that, so this is harmless |
 | `perk_close(db)` | Closes the connection and frees the handle. NULL is ignored. An open transaction is rolled back | Lifecycle | Returns `void`, so a failed `sqlite3_close` can't be reported (it can't currently fail because every statement is finalized) |
 | `perk_errmsg(db)` | Returns the last error message for `db`, or for the last failed `perk_open` on this thread if `db` is NULL | Support | The message is not cleared when a call succeeds, so it can be stale. Calls that return `PERK_ERR_MISUSE` because `db == NULL` set no message |
 
@@ -107,8 +107,9 @@ Listed for completeness. Callers can't use these.
 | `perk_sqlite_error` | `perk_util.c` | Copies SQLite's message and maps the rc to a `PerkErr` (BUSY/LOCKED to BUSY, NOMEM to NOMEM, everything else to SQL) |
 | `perk_finish_sql`, `perk_discard_sql` | `perk_util.c` | Finish or free a `sqlite3_str` builder |
 | `perk_bind_values` | `perk_util.c` | Binds `PerkValue[]` with `sqlite3_bind_*` |
-| `perk_append_where` | `perk_where.c` | Tokenizes and rebuilds a WHERE clause against a whitelist |
+| `perk_append_where` | `perk_where.c` | Tokenizes and rebuilds a WHERE clause against a whitelist; `IN` must be followed by `(`, `LIKE`/`GLOB` must follow an operand |
 | `perk_result_from_stmt` | `perk_result.c` | Steps a statement and copies all rows into a `PerkResult` |
+| `harden_connection` (static) | `perkdb.c` | Applies the `sqlite3_db_config` / `sqlite3_limit` safety settings at open |
 | `check_names`, `prepare_sql`, `run_write`, `match_column_type`, `begin_select`, `finish_select`, `not_found_if_unchanged` (static) | `perk_crud.c` | Name checks, prepare, step-to-done, the column type whitelist, shared SELECT building/running, and mapping 0 changed rows to `PERK_ERR_NOT_FOUND` |
 
 Note: `validate_identifier` has no `perk_` prefix even though it is an external symbol in
@@ -148,3 +149,36 @@ end of `BACKLOG.md`.
   `-Werror`. GUIDELINES.md asks for `-Werror`.
 - **Formatting:** The source uses 4-space Allman-style braces, not the Google
   clang-format style named in GUIDELINES.md.
+
+## SQL injection hardening (story "SQL injection hardening", 2026-10-12)
+
+Every place SQL text is built was traced. Verdicts:
+
+| Site | Verdict |
+|---|---|
+| `perk_create_table` (`perk_crud.c`): table/column names | Validated by `validate_identifier()` before use, emitted as `"%w"` |
+| `perk_create_table`: column types | Emitted only from the fixed `column_types[]` whitelist, never the caller's string |
+| `perk_create_table`: flags | Unknown bits rejected; only constant `PRIMARY KEY` / `NOT NULL` / `UNIQUE` text is emitted |
+| `find_schema_object` (`perk_crud.c`) | Constant SQL; name is bound (`?1`) |
+| `perk_insert`, `perk_update`, `perk_delete`, `perk_select`, `perk_select_by_id` | Names validated then `"%w"`-quoted; every value goes through `perk_bind_values()` (`sqlite3_bind_*`) |
+| `perk_append_where` (`perk_where.c`) | Rebuilt from whitelisted tokens. **Two bypasses fixed** (below) |
+| `perk_open` PRAGMAs (`perkdb.c`) | Constant string, no caller input |
+| `BEGIN IMMEDIATE` / `COMMIT` / `ROLLBACK` (`perk_tx.c`) | Constant strings, no caller input |
+| `validate_identifier` (`perk_util.c`) | Implements `^[A-Za-z_][A-Za-z0-9_]{0,63}$` with explicit ASCII ranges (no `ctype`/locale); bytes >= 0x80 are negative or out of range and rejected; NULL, "", 65+ chars rejected; `sqlite_` prefix (any case) rejected |
+| `prepare_sql` (`perk_crud.c`) | Previously ignored the prepare tail. Now refuses SQL with more than one statement (defense in depth; generated SQL can never contain `;`) |
+
+Fixed WHERE bypasses (both reached data outside the named table or the "no functions" rule):
+
+- `id IN secret` was valid SQLite (`expr IN table-name`) and read another table. `IN`
+  must now be followed by `(`; otherwise `PERK_ERR_MISUSE`.
+- `like(?, ?)` / `glob(?, ?)` in operand position were parsed by SQLite as function
+  calls. `LIKE` / `GLOB` are now accepted only after a column, `?`, `)` or `NULL`
+  (optionally with `NOT` between); otherwise `PERK_ERR_MISUSE`.
+
+Connection hardening added in `perk_open`: `SQLITE_DBCONFIG_DEFENSIVE` on,
+`SQLITE_DBCONFIG_ENABLE_LOAD_EXTENSION` off, `SQLITE_DBCONFIG_TRUSTED_SCHEMA` off,
+`SQLITE_DBCONFIG_DQS_DML/DDL` off (also compiled in with `-DSQLITE_DQS=0`), and
+`SQLITE_LIMIT_ATTACHED` = 0. If any setting fails, `perk_open` returns `PERK_ERR_OPEN`.
+
+Behavior changes: the two WHERE forms above are now rejected; opened databases can't
+use writable_schema, load_extension or ATTACH (none were reachable through the API).
