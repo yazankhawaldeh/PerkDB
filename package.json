@@ -23,7 +23,7 @@
   "scripts": {
     "install": "node-gyp rebuild",
     "build": "node-gyp rebuild",
-    "test": "node tests/test_addon.js"
+    "test": "node tests/test_addon.js && node --expose-gc tests/test_addon_crud.js"
   },
   "engines": {
     "node": "^18.17.0 || >=20.5.0"

@@ -7,6 +7,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 // This is defined in perk_internal.h
 typedef struct PerkDB PerkDB;
@@ -55,21 +58,32 @@ typedef struct {
     } as;
 } PerkValue;
 
+// The value constructors fill a zeroed local with plain assignments (no
+// designated initializers) so this header also compiles as C++.
+
 static inline PerkValue perk_int(int64_t v)
 {
-    PerkValue pv = { .type = PERK_INT, .as.i = v };
+    PerkValue pv;
+    memset(&pv, 0, sizeof(pv));
+    pv.type = PERK_INT;
+    pv.as.i = v;
     return pv;
 }
 
 static inline PerkValue perk_real(double v)
 {
-    PerkValue pv = { .type = PERK_REAL, .as.r = v };
+    PerkValue pv;
+    memset(&pv, 0, sizeof(pv));
+    pv.type = PERK_REAL;
+    pv.as.r = v;
     return pv;
 }
 
 static inline PerkValue perk_null(void)
 {
-    PerkValue pv = { .type = PERK_NULL };
+    PerkValue pv;
+    memset(&pv, 0, sizeof(pv));
+    pv.type = PERK_NULL;
     return pv;
 }
 
@@ -78,13 +92,21 @@ static inline PerkValue perk_text(const char *v)
 {
     if (v == NULL)
         return perk_null();
-    PerkValue pv = { .type = PERK_TEXT, .as.text = { v, strlen(v) } };
+    PerkValue pv;
+    memset(&pv, 0, sizeof(pv));
+    pv.type = PERK_TEXT;
+    pv.as.text.ptr = v;
+    pv.as.text.len = strlen(v);
     return pv;
 }
 
 static inline PerkValue perk_blob(const void *p, size_t n)
 {
-    PerkValue pv = { .type = PERK_BLOB, .as.blob = { p, n } };
+    PerkValue pv;
+    memset(&pv, 0, sizeof(pv));
+    pv.type = PERK_BLOB;
+    pv.as.blob.ptr = p;
+    pv.as.blob.len = n;
     return pv;
 }
 
@@ -192,5 +214,9 @@ void    perk_result_free(PerkResult*);
 
 // perk_begin starts a write (IMMEDIATE) transaction. Nesting is PERK_ERR_MISUSE.
 PerkErr perk_begin(PerkDB*); PerkErr perk_commit(PerkDB*); PerkErr perk_rollback(PerkDB*);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

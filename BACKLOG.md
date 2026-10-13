@@ -29,7 +29,7 @@ Indent acceptance criteria under each story so the testers and QA can check them
   - Tests cover oversized strings, empty strings, max-length identifiers, and NULL pointers for every function
 - [x] Node addon: build and load
   - node-addon-api + node-gyp; `npm install && node -e "require('./')"` works on macOS and Linux
-- [ ] Node addon: expose CRUD functions
+- [x] Node addon: expose CRUD functions
   - Every C function is callable from JS; C error enums become thrown Errors with a `code` property
   - DB handle is closed when the JS object is garbage-collected
 - [ ] Node addon: TypeScript types and example

@@ -53,7 +53,7 @@ test: $(TESTS:%=$(BUILD)/%)
 	if [ -n "$$failed" ]; then echo "FAILED test suites:$$failed"; exit 1; fi; \
 	echo "All test suites passed: $(TESTS)"
 
-# Node addon smoke test. Needs the addon built first (`npm run build`); it is
+# Node addon smoke + CRUD tests. Needs the addon built first (`npm run build`); it is
 # deliberately not part of `make test`, which must not require node.
 test-addon:
 	@if [ ! -f $(BUILD)/Release/perkdb.node ]; then \
@@ -61,6 +61,7 @@ test-addon:
 	    exit 1; \
 	fi
 	node tests/test_addon.js
+	node --expose-gc tests/test_addon_crud.js
 
 $(BUILD)/test_%: tests/test_%.c tests/test_harness.h $(SRCS) perkdb.h perk_internal.h $(SQLITE_OBJ) | $(BUILD)
 	$(CC) $(WARN) $(SAN) -I. $< $(SRCS) $(SQLITE_OBJ) -o $@ $(LDLIBS)
