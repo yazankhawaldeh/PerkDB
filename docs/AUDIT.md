@@ -60,7 +60,7 @@ update / delete" needs. There is also no `PERK_ERR_CONSTRAINT`.
 
 | Function | What it does | CRUD op | Known gaps |
 |---|---|---|---|
-| `perk_create_table(db, table, cols, ncols)` | Builds `CREATE TABLE IF NOT EXISTS` from `PerkColumn[]`, with a type whitelist (INTEGER, INT, REAL, TEXT, BLOB, NUMERIC or NULL) and PK/NOTNULL/UNIQUE flags. Several PK columns make a composite key | Create (schema) | Returns `PERK_OK` if the table already exists, even if the schema is different. The backlog wants an error for that ("Complete create-table"). No DEFAULT, CHECK, FOREIGN KEY/REFERENCES, AUTOINCREMENT, or WITHOUT ROWID support. No way to check whether a table exists. No drop table (see Delete) |
+| `perk_create_table(db, table, cols, ncols)` | Builds `CREATE TABLE` from `PerkColumn[]`, with a type whitelist (INTEGER, INT, REAL, TEXT, BLOB, NUMERIC or NULL) and PK/NOTNULL/UNIQUE flags. Several PK columns make a composite key | Create (schema) | Returns `PERK_ERR_EXISTS` if any schema object already holds the name (case-insensitive). No DEFAULT, CHECK, FOREIGN KEY/REFERENCES, AUTOINCREMENT, or WITHOUT ROWID support. No way to check whether a table exists. No drop table (see Delete) |
 | `perk_insert(db, table, cols, vals, n, &rowid)` | Inserts one row with bound values. Can return the new rowid | Create (row) | Only one row per call, so there is no bulk insert. No upsert or conflict handling (`INSERT OR REPLACE`, `ON CONFLICT ... DO UPDATE`). Constraint violations come back as the generic `PERK_ERR_SQL`. `rowid_out` means nothing for WITHOUT ROWID tables (not creatable today anyway) |
 
 ### Read (`perk_crud.c`, `perk_result.c`)
@@ -117,7 +117,7 @@ the static library. It could collide with a symbol in a user's program.
 
 | Feature | Status |
 |---|---|
-| Create table | Done, but silently succeeds if the table exists (backlog: "Complete create-table") |
+| Create table | Done; returns `PERK_ERR_EXISTS` if the name is taken |
 | Drop table | **Missing** |
 | Insert one row | Done |
 | Insert many rows in one call | **Missing** |

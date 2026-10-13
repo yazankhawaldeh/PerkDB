@@ -64,6 +64,64 @@ static const char *match_column_type(const char *type)
     return NULL;
 }
 
+/*
+ * Looks up a schema object (table, view, index or trigger) in the main database
+ * by name, compared case-insensitively like SQLite does. The name is bound, never
+ * formatted into the SQL.
+ * @param db open handle
+ * @param name name to look for
+ * @param type_out receives the object type ("table", "index", ...) when found
+ * @param type_cap size of type_out
+ * @param found set to 1 if an object with that name exists, 0 otherwise
+ * @return PERK_OK, or the mapped SQLite error if the lookup itself failed
+ */
+static PerkErr find_schema_object(PerkDB *db, const char *name, char *type_out, size_t type_cap, int *found)
+{
+    *found = 0;
+    sqlite3_stmt *st = NULL;
+    int rc = sqlite3_prepare_v2(db->conn,
+                                "SELECT type FROM main.sqlite_master WHERE name = ?1 COLLATE NOCASE LIMIT 1",
+                                -1, &st, NULL);
+    if (rc != SQLITE_OK)
+        return perk_sqlite_error(db, rc);
+    rc = sqlite3_bind_text(st, 1, name, -1, SQLITE_STATIC);
+    if (rc == SQLITE_OK)
+        rc = sqlite3_step(st);
+
+    PerkErr err = PERK_OK;
+    if (rc == SQLITE_ROW)
+    {
+        const unsigned char *type = sqlite3_column_text(st, 0);
+        snprintf(type_out, type_cap, "%s", type ? (const char *)type : "object");
+        *found = 1;
+    }
+    else if (rc != SQLITE_DONE)
+        err = perk_sqlite_error(db, rc);
+    sqlite3_finalize(st);
+    return err;
+}
+
+/*
+ * Checks whether table's name is already taken and, if so, sets the error message.
+ * @param db open handle
+ * @param table validated table name
+ * @return PERK_ERR_EXISTS if the name is taken, PERK_OK if it is free, or the
+ *         lookup's error
+ */
+static PerkErr check_table_absent(PerkDB *db, const char *table)
+{
+    char type[16];
+    int found = 0;
+    PerkErr err = find_schema_object(db, table, type, sizeof(type), &found);
+    if (err != PERK_OK)
+        return err;
+    if (!found)
+        return PERK_OK;
+    snprintf(db->errmsg, sizeof(db->errmsg),
+             "perk_create_table: a %s named \"%s\" already exists", type, table);
+    return PERK_ERR_EXISTS;
+}
+
 PerkErr perk_create_table(PerkDB *db, const char *table, const PerkColumn *cols, size_t ncols)
 {
     if (db == NULL)
@@ -106,8 +164,12 @@ PerkErr perk_create_table(PerkDB *db, const char *table, const PerkColumn *cols,
             npk++;
     }
 
+    PerkErr err = check_table_absent(db, table);
+    if (err != PERK_OK)
+        return err;
+
     sqlite3_str *s = sqlite3_str_new(db->conn);
-    sqlite3_str_appendf(s, "CREATE TABLE IF NOT EXISTS \"%w\" (", table);
+    sqlite3_str_appendf(s, "CREATE TABLE \"%w\" (", table);
     for (size_t i = 0; i < ncols; i++)
     {
         sqlite3_str_appendf(s, "%s\"%w\"", i ? ", " : "", cols[i].name);
@@ -133,10 +195,19 @@ PerkErr perk_create_table(PerkDB *db, const char *table, const PerkColumn *cols,
     sqlite3_str_appendchar(s, 1, ')');
 
     sqlite3_stmt *st = NULL;
-    PerkErr err = prepare_sql(db, s, &st);
-    if (err != PERK_OK)
-        return err;
-    return run_write(db, st, NULL);
+    err = prepare_sql(db, s, &st);
+    if (err == PERK_OK)
+        err = run_write(db, st, NULL);
+    // Another connection may have created the name after the check above
+    if (err == PERK_ERR_SQL)
+    {
+        char create_msg[sizeof(db->errmsg)];
+        memcpy(create_msg, db->errmsg, sizeof(create_msg));
+        if (check_table_absent(db, table) == PERK_ERR_EXISTS)
+            return PERK_ERR_EXISTS;
+        memcpy(db->errmsg, create_msg, sizeof(create_msg));  // keep the CREATE failure's message
+    }
+    return err;
 }
 
 PerkErr perk_insert(PerkDB *db, const char *table, const char **cols, const PerkValue *vals, size_t n, int64_t *rowid_out)

@@ -43,7 +43,7 @@ static void test_create_table(void)
         { "misc",  NULL,      0 },
     };
     CHECK_ERR(perk_create_table(db, "users", users, 6), PERK_OK);
-    CHECK_ERR(perk_create_table(db, "users", users, 6), PERK_OK);  // IF NOT EXISTS
+    CHECK_ERR(perk_create_table(db, "users", users, 6), PERK_ERR_EXISTS);  // duplicates are rejected
 
     PerkColumn pair[] = { { "a", "INT", PERK_COL_PK }, { "b", "INT", PERK_COL_PK } };
     CHECK_ERR(perk_create_table(db, "pairs", pair, 2), PERK_OK);

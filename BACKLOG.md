@@ -14,7 +14,7 @@ Indent acceptance criteria under each story so the testers and QA can check them
   - `make test` compiles everything in tests/ and runs it; exits non-zero on any failure
   - Tests build with -fsanitize=address,undefined -g
   - Small assert macros print file, line, and expected vs actual
-- [ ] Complete create-table
+- [x] Complete create-table
   - Creates a table from a caller-supplied schema; returns the error enum if it already exists or the name is invalid
   - Tests: happy path, duplicate table, invalid name, NULL args
 - [ ] Complete insert / read / update / delete

@@ -89,6 +89,7 @@ static const char *err_name(PerkErr e)
     case PERK_ERR_BADNAME: return "ERR_BADNAME";
     case PERK_ERR_NOMEM: return "ERR_NOMEM";
     case PERK_ERR_MISUSE: return "ERR_MISUSE";
+    case PERK_ERR_EXISTS: return "ERR_EXISTS";
     }
     return "?";
 }

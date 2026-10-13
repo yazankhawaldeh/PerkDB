@@ -16,7 +16,8 @@ typedef enum {
     PERK_OK = 0,
     PERK_ERR_OPEN, PERK_ERR_SQL, PERK_ERR_BUSY,
     PERK_ERR_BADNAME, PERK_ERR_NOMEM,
-    PERK_ERR_MISUSE  // NULL handle, missing arguments, or a malformed PerkValue
+    PERK_ERR_MISUSE, // NULL handle, missing arguments, or a malformed PerkValue
+    PERK_ERR_EXISTS  // perk_create_table: a table, view or index with that name already exists
 } PerkErr;
 
 // Column inputs to perk_create_table() and flags for Primary Key, Not Null, and Unique
@@ -111,7 +112,9 @@ void perk_close(PerkDB *db);
 // Message for the last error on db, or for the last failed perk_open() if db is NULL
 const char *perk_errmsg(PerkDB *db);
 
-// Creates the table if it doesn't already exist. Column type may be NULL or one of
+// Creates a new table. Returns PERK_ERR_EXISTS (and leaves the existing schema untouched)
+// if a table, view or index with that name already exists; names are compared
+// case-insensitively, as SQLite does. Column type may be NULL or one of
 // INTEGER, INT, REAL, TEXT, BLOB, NUMERIC. More than one PERK_COL_PK column makes a composite key.
 PerkErr perk_create_table(PerkDB*, const char *table, const PerkColumn *cols, size_t ncols);
 
