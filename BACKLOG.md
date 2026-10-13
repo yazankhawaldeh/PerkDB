@@ -10,7 +10,7 @@ Indent acceptance criteria under each story so the testers and QA can check them
   - Write docs/AUDIT.md listing every public function: what it does, which CRUD op it covers, known gaps
   - Append one new story per missing CRUD feature to the end of BACKLOG.md, with acceptance criteria
   - No production code changes in this story
-- [ ] Build test harness
+- [x] Build test harness
   - `make test` compiles everything in tests/ and runs it; exits non-zero on any failure
   - Tests build with -fsanitize=address,undefined -g
   - Small assert macros print file, line, and expected vs actual

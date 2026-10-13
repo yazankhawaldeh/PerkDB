@@ -1,6 +1,6 @@
 CC      = cc
 AR      = ar
-WARN    = -std=c11 -Wall -Wextra -Wpedantic
+WARN    = -std=c11 -Wall -Wextra -Wpedantic -Werror
 CFLAGS  = $(WARN) -O2 -MMD -MP
 # DQS=0 makes SQLite treat "..." strictly as identifiers, never string literals
 SQLITE_CFLAGS = -O2 -DSQLITE_DQS=0
@@ -36,16 +36,24 @@ shell: $(BUILD)/sqlite3
 $(BUILD)/sqlite3: sqlite3-src/shell.c $(SQLITE_OBJ)
 	$(CC) $(SQLITE_CFLAGS) $^ -o $@ $(LDLIBS)
 
-# Test suites, built with AddressSanitizer and UndefinedBehaviorSanitizer
-TESTS = test_perkdb test_injection test_rw
+# Test suites: every tests/test_*.c is built with AddressSanitizer and
+# UndefinedBehaviorSanitizer and run. All suites run even if one fails; the
+# target exits non-zero if any of them failed.
+TESTS = $(patsubst tests/%.c,%,$(wildcard tests/test_*.c))
 SAN   = -g -O1 -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer
 
-test: $(TESTS:%=$(BUILD)/%)
-	./$(BUILD)/test_perkdb
-	./$(BUILD)/test_injection 5000
-	./$(BUILD)/test_rw 2000 $(BUILD)/test_rw.db
+# Optional per-suite command-line arguments (suites without an entry get none)
+ARGS_test_injection = 5000
+ARGS_test_rw        = 2000 $(BUILD)/test_rw.db
 
-$(BUILD)/test_%: tests/test_%.c $(SRCS) perkdb.h perk_internal.h $(SQLITE_OBJ) | $(BUILD)
+test: $(TESTS:%=$(BUILD)/%)
+	@failed=""; \
+	$(foreach t,$(TESTS),echo "./$(BUILD)/$(t) $(ARGS_$(t))"; \
+	    ./$(BUILD)/$(t) $(ARGS_$(t)) || failed="$$failed $(t)";) \
+	if [ -n "$$failed" ]; then echo "FAILED test suites:$$failed"; exit 1; fi; \
+	echo "All test suites passed: $(TESTS)"
+
+$(BUILD)/test_%: tests/test_%.c tests/test_harness.h $(SRCS) perkdb.h perk_internal.h $(SQLITE_OBJ) | $(BUILD)
 	$(CC) $(WARN) $(SAN) -I. $< $(SRCS) $(SQLITE_OBJ) -o $@ $(LDLIBS)
 
 # Optimized write/read benchmark (no sanitizers) on a file-backed database

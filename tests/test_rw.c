@@ -9,11 +9,9 @@
 #include <string.h>
 #include <time.h>
 
-static int failures = 0;
-static int checks = 0;
-
-#define CHECK(cond) do { checks++; if (!(cond)) { failures++; \
-    if (failures <= 20) printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); } } while (0)
+// Large runs can fail thousands of times; only the first 20 failures are printed
+#define HARNESS_MAX_REPORTED 20
+#include "test_harness.h"
 
 static double now(void)
 {
@@ -150,7 +148,8 @@ static size_t nphases = 0;
 static void record_phase(const char *name, size_t ops, double secs, int ok)
 {
     phases[nphases++] = (Phase){ name, ops, secs, ok };
-    CHECK(ok);
+    if (!ASSERT_TRUE(ok))
+        printf("  phase: %s\n", name);
 }
 
 static int insert_rec(PerkDB *db, Rec *r)
@@ -165,14 +164,14 @@ static int insert_rec(PerkDB *db, Rec *r)
 static void test_edge_values(PerkDB *db)
 {
     PerkColumn cols[] = { { "id", "INTEGER", PERK_COL_PK }, { "v", NULL, 0 } };
-    CHECK(perk_create_table(db, "edge", cols, 2) == PERK_OK);
+    ASSERT_EQ_INT(perk_create_table(db, "edge", cols, 2), PERK_OK);
 
     size_t big = 1024 * 1024;
     char *big_text = malloc(big);
     unsigned char *big_blob = malloc(big);
     if (big_text == NULL || big_blob == NULL)
     {
-        CHECK(!"out of memory");
+        ASSERT_TRUE(!"out of memory");
         free(big_text);
         free(big_blob);
         return;
@@ -249,7 +248,8 @@ static void test_edge_values(PerkDB *db)
                note[0] ? "  - " : "", note);
         // NaN and -0.0 are SQLite storage rules, not PerkDB bugs; everything else must be exact
         if (!(want->type == PERK_REAL && (isnan(want->as.r) || (want->as.r == 0.0 && signbit(want->as.r)))))
-            CHECK(same);
+            if (!ASSERT_TRUE(same))
+                printf("  edge case: %s\n", cases[i].label);
         perk_result_free(res);
     }
 
@@ -294,7 +294,7 @@ int main(int argc, char **argv)
         { "data", "BLOB", 0 },
         { "note", "TEXT", 0 },
     };
-    CHECK(perk_create_table(db, "items", schema, 6) == PERK_OK);
+    ASSERT_EQ_INT(perk_create_table(db, "items", schema, 6), PERK_OK);
 
     printf("PerkDB write/read suite: %zu records, file %s\n", total, path);
 
@@ -425,6 +425,6 @@ int main(int argc, char **argv)
     remove(wal);
     remove(shm);
 
-    printf("\n%d/%d checks passed\n", checks - failures, checks);
-    return failures != 0;
+    printf("\n");
+    return harness_summary();
 }
